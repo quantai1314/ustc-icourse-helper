@@ -3,7 +3,7 @@
 // @name:zh-CN   USTC 评课社区助手
 // @license      gpl-3.0
 // @namespace    ustc-icourse-helper
-// @version      1.2.0
+// @version      1.2.1
 // @description  Auto-collect attachments and links from course reviews on icourse.club into a floating panel, with one-click collection from other teachers' pages of the same course. Works for anonymous users too (attachments shown as login-required). Based on PRO's USTC Helper (GPL-3.0) icourse module, no external dependencies.
 // @description:zh-CN  自动收集评课社区课程点评区的附件和链接,在页面右侧生成悬浮汇总面板,支持快速定位到原点评;可一键搜集同课程其他老师页面的资料(当日缓存)。未登录也能用:附件显示名称并提示登录后下载。基于 PRO 的 USTC Helper (GPL-3.0) icourse 模块提取,无任何外部依赖。
 // @match        https://icourse.club/*
@@ -76,6 +76,7 @@
 #uih-body { overflow-y: auto; padding: 4px 10px 8px; }
 .uih-sec-title { font-weight: bold; color: #337ab7; margin: 6px 0 2px; }
 .uih-item { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
+.uih-item.uih-gap { margin-top: 6px; padding-top: 8px; border-top: 1px dashed #e3e3e3; }
 .uih-link { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #337ab7; text-decoration: none; }
 .uih-link:hover { text-decoration: underline; }
 .uih-teacher { flex: none; font-size: 12px; color: #999; text-decoration: none; }
@@ -109,8 +110,14 @@
     const secs = {};
 
     function addRow(sec, item, { downloadable = false } = {}) {
+        // 相邻条目来源老师不同(含本页→其他老师)时,加分隔间距便于区分分组
+        const rows = sec.querySelectorAll('.uih-item');
+        const prev = rows[rows.length - 1];
+        const teacher = item.teacher || '';
         const row = sec.appendChild(document.createElement('div'));
         row.className = 'uih-item';
+        if (prev && prev.dataset.teacher !== teacher) row.classList.add('uih-gap');
+        row.dataset.teacher = teacher;
         const a = row.appendChild(document.createElement('a'));
         a.className = 'uih-link';
         a.textContent = item.name;

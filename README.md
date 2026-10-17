@@ -14,7 +14,7 @@
 ## 安装
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展
-2. 点击安装：[USTC-Icourse-Helper.user.js](https://github.com/quantai1314/ustc-icourse-helper/raw/main/USTC-Icourse-Helper.user.js)（或从 Greasyfork 安装，链接待补充）
+2. 点击安装：[Greasyfork](https://greasyfork.org/zh-CN/scripts/600738-ustc-icourse-helper)（推荐，自动更新）或 [USTC-Icourse-Helper.user.js](https://github.com/quantai1314/ustc-icourse-helper/raw/main/USTC-Icourse-Helper.user.js)
 
 ## 说明
 
