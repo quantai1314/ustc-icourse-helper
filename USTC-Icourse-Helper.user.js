@@ -3,7 +3,7 @@
 // @name:zh-CN   USTC 评课社区助手
 // @license      gpl-3.0
 // @namespace    ustc-icourse-helper
-// @version      1.5.1
+// @version      1.5.2
 // @description  Auto-collect attachments and links from course reviews on icourse.club into a floating panel, with one-click collection from other teachers' pages of the same course. Works for anonymous users too (attachments shown as login-required). Based on PRO's USTC Helper (GPL-3.0) icourse module, no external dependencies.
 // @description:zh-CN  自动收集评课社区课程点评区的附件和链接,在页面右侧生成悬浮汇总面板,支持快速定位到原点评;可一键搜集同课程其他老师页面的资料(当日缓存)。未登录也能用:附件显示名称并提示登录后下载。基于 PRO 的 USTC Helper (GPL-3.0) icourse 模块提取,无任何外部依赖。
 // @match        https://icourse.club/*
@@ -278,17 +278,19 @@
         const collected = new Map();
         let loadedCache = false;
         let busy = false;
+        const normHref = href => href.replace(/\/$/, '');
+        const plain = items => items.map(({ name, href }) => ({ name, href }));
         function readCache(key = cacheKey) {
             try {
                 const c = JSON.parse(localStorage.getItem(key));
                 if (c?.version !== 2 || c.date !== new Date().toDateString() || !Array.isArray(c.pages)) return;
                 for (const page of c.pages) {
-                    if (!teachers.some(t => t.href === page.href) || !Array.isArray(page.files) || !Array.isArray(page.links)) continue;
+                    const teacher = teachers.find(t => normHref(t.href) === normHref(page.href));
+                    if (!teacher || !Array.isArray(page.files) || !Array.isArray(page.links)) continue;
                     const validFile = f => f && typeof f.name === 'string' && (f.href === null || (typeof f.href === 'string' && f.href.startsWith('/uploads/files/')));
                     const validLink = l => l && typeof l.name === 'string' && typeof l.href === 'string' && /^https?:\/\//i.test(l.href);
                     if (page.files.every(validFile) && page.links.every(validLink)) {
-                        const plain = items => items.map(({ name, href }) => ({ name, href }));
-                        collected.set(page.href, { href: page.href, files: plain(page.files), links: plain(page.links) });
+                        collected.set(teacher.href, { href: teacher.href, files: plain(page.files), links: plain(page.links) });
                     }
                 }
             } catch (e) { /* 忽略损坏的缓存 */ }
@@ -370,7 +372,10 @@
                 moreBtn.textContent = failed ? `重试失败的 ${failed} 位老师` : '搜集完成';
                 moreBtn.disabled = !failed;
                 try {
-                    localStorage.setItem(cacheKey, JSON.stringify({ version: 2, date: new Date().toDateString(), pages: [...collected.values()] }));
+                    // 缓存连本页自身一起存,跨页恢复时来源页老师不会被算作未搜集。
+                    const pages = [...collected.values()].filter(p => normHref(p.href) !== `/course/${courseId}`);
+                    pages.push({ href: `/course/${courseId}`, files: plain(local.files), links: plain(local.links) });
+                    localStorage.setItem(cacheKey, JSON.stringify({ version: 2, date: new Date().toDateString(), pages }));
                 } catch (e) { /* 存储不可用时仍可在当前页面重试 */ }
             }
         });
