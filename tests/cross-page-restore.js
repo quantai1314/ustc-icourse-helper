@@ -1,5 +1,5 @@
 async (page) => {
-    const context = await page.context().browser().newContext();
+    const context = await page.context().browser().newContext({ reducedMotion: 'no-preference' });
     page = await context.newPage();
     const files = (prefix, count = 30) => Array.from({ length: count }, (_, index) => ({
         name: `${prefix} 资料 ${String(index + 1).padStart(2, '0')}`,
@@ -40,7 +40,7 @@ async (page) => {
         ).join('');
         await route.fulfill({
             contentType: 'text/html; charset=utf-8',
-            body: `<!doctype html><html><head><meta charset="utf-8"><title>课程 ${id}</title></head><body>` +
+            body: `<!doctype html><html><head><meta charset="utf-8"><title>课程 ${id}</title><style>.review-content{min-height:80px}</style></head><body>` +
                 `<main>${reviews}</main><div class="col-md-4 rl-pd-lg"><div><h4>其他老师的课</h4>${teacherLinks}</div></div>` +
                 `<script src="https://icourse.club/__uih.user.js"></script></body></html>`,
         });
@@ -68,24 +68,62 @@ async (page) => {
     served.length = 0;
 
     const opened = page.context().waitForEvent('page');
-    await page.locator('.uih-item', { hasText: 'B 资料 01' }).locator('.uih-loc').evaluate(button => button.click());
+    await page.locator('.uih-item', { hasText: 'B 资料 20' }).locator('.uih-loc').evaluate(button => button.click());
     const target = await opened;
     await target.waitForLoadState('load');
     await target.locator('#ustc-icourse-helper').waitFor();
 
-    const restored = await target.evaluate(() => ({
-        open: !document.querySelector('#uih-panel').hidden,
-        query: document.querySelector('#uih-search').value,
-        filter: document.querySelector('[data-filter="files"]').getAttribute('aria-pressed'),
-        scrollTop: document.querySelector('#uih-body').scrollTop,
-        cachedRows: Array.from(document.querySelectorAll('.uih-item')).filter(row => row.textContent.includes('C 资料 01')).length,
-    }));
+    const restored = await target.evaluate(() => {
+        const row = Array.from(document.querySelectorAll('.uih-item')).find(row =>
+            row.querySelector('.uih-link').textContent === 'B 资料 20' && row.textContent.includes('本页点评'));
+        const review = Array.from(document.querySelectorAll('.review-content a')).find(a => a.textContent === 'B 资料 20');
+        const bodyBox = document.querySelector('#uih-body').getBoundingClientRect();
+        const rowBox = row.getBoundingClientRect();
+        const reviewBox = review.getBoundingClientRect();
+        return {
+            open: !document.querySelector('#uih-panel').hidden,
+            query: document.querySelector('#uih-search').value,
+            filter: document.querySelector('[data-filter="files"]').getAttribute('aria-pressed'),
+            scrollTop: document.querySelector('#uih-body').scrollTop,
+            rowOffset: Math.abs(rowBox.top + rowBox.height / 2 - bodyBox.top - bodyBox.height / 2),
+            rowAnimations: row.getAnimations().length,
+            reviewOffset: Math.abs(reviewBox.top + reviewBox.height / 2 - innerHeight / 2),
+            cachedRows: Array.from(document.querySelectorAll('.uih-item')).filter(row => row.textContent.includes('C 资料 01')).length,
+        };
+    });
     if (!restored.open) throw new Error('跨页定位后悬浮窗未自动展开');
     if (restored.query !== '资料') throw new Error(`搜索词未恢复: ${restored.query}`);
     if (restored.filter !== 'true') throw new Error('文件筛选状态未恢复');
-    if (restored.scrollTop !== 120) throw new Error(`列表滚动位置未恢复: ${restored.scrollTop}`);
+    if (restored.rowOffset > 1) throw new Error(`浮窗未定位到本页对应文件: 偏差 ${restored.rowOffset}, scrollTop ${restored.scrollTop}`);
+    if (!restored.rowAnimations) throw new Error('本页对应文件未高亮');
+    if (restored.reviewOffset > 1) throw new Error(`正文未定位到原点评: 偏差 ${restored.reviewOffset}`);
     if (restored.cachedRows !== 1) throw new Error('来源页的当日搜集缓存未恢复');
     if (served.join(',') !== '102') throw new Error(`恢复过程意外重新抓取了课程页: ${served.join(',')}`);
+
+    await page.locator('#uih-search').fill('乙老师');
+    served.length = 0;
+    const teacherOpened = page.context().waitForEvent('page');
+    await page.locator('.uih-item', { hasText: 'B 资料 20' }).locator('.uih-loc').evaluate(button => button.click());
+    const teacherTarget = await teacherOpened;
+    await teacherTarget.waitForLoadState('load');
+    await teacherTarget.locator('#ustc-icourse-helper').waitFor();
+    const teacherResult = await teacherTarget.evaluate(() => {
+        const row = Array.from(document.querySelectorAll('.uih-item')).find(row =>
+            row.querySelector('.uih-link').textContent === 'B 资料 20' && row.textContent.includes('本页点评'));
+        const review = Array.from(document.querySelectorAll('.review-content a')).find(a => a.textContent === 'B 资料 20');
+        const reviewBox = review.getBoundingClientRect();
+        return {
+            query: document.querySelector('#uih-search').value,
+            rowVisible: Boolean(row),
+            rowAnimations: row ? row.getAnimations().length : 0,
+            reviewOffset: Math.abs(reviewBox.top + reviewBox.height / 2 - innerHeight / 2),
+        };
+    });
+    if (teacherResult.query !== '乙老师') throw new Error('老师名搜索词未恢复');
+    if (!teacherResult.rowVisible) throw new Error('按老师名搜索时，本页目标文件被过滤');
+    if (!teacherResult.rowAnimations) throw new Error('按老师名搜索时，本页目标文件未高亮');
+    if (teacherResult.reviewOffset > 1) throw new Error('按老师名搜索时，正文未定位到原点评');
+    if (served.join(',') !== '102') throw new Error(`老师名搜索恢复时意外抓取了课程页: ${served.join(',')}`);
 
     await page.goto('https://icourse.club/course/102/');
     if (await page.locator('#uih-panel').isVisible()) throw new Error('普通打开课程页时不应自动展开悬浮窗');
@@ -103,7 +141,6 @@ async (page) => {
         'uih-source': '101',
         'uih-filter': 'all',
         'uih-query': '',
-        'uih-scroll': '0',
     });
     await missing.goto(`https://icourse.club/course/102/#${missingParams}`);
     await missing.locator('#ustc-icourse-helper').waitFor();
@@ -128,5 +165,5 @@ async (page) => {
     if (savedPages.join(',') !== '/course/101/,/course/103/') throw new Error(`手动补搜集覆盖了目标页已有缓存: ${savedPages.join(',')}`);
     if (served.length) throw new Error(`目标页已有缓存的老师被重新请求: ${served.join(',')}`);
     await context.close();
-    return '跨页恢复、缓存缺失、目标缓存合并与不自动抓取检查通过';
+    return '双定位、跨页恢复、缓存缺失、目标缓存合并与不自动抓取检查通过';
 }

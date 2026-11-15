@@ -3,7 +3,7 @@
 // @name:zh-CN   USTC 评课社区助手
 // @license      gpl-3.0
 // @namespace    ustc-icourse-helper
-// @version      1.5.0
+// @version      1.5.1
 // @description  Auto-collect attachments and links from course reviews on icourse.club into a floating panel, with one-click collection from other teachers' pages of the same course. Works for anonymous users too (attachments shown as login-required). Based on PRO's USTC Helper (GPL-3.0) icourse module, no external dependencies.
 // @description:zh-CN  自动收集评课社区课程点评区的附件和链接,在页面右侧生成悬浮汇总面板,支持快速定位到原点评;可一键搜集同课程其他老师页面的资料(当日缓存)。未登录也能用:附件显示名称并提示登录后下载。基于 PRO 的 USTC Helper (GPL-3.0) icourse 模块提取,无任何外部依赖。
 // @match        https://icourse.club/*
@@ -148,9 +148,11 @@
     const status = root.querySelector('#uih-status');
     const moreBtn = root.querySelector('#uih-more');
     const state = { files: [...local.files], links: [...local.links], filter: 'all' };
+    const itemRows = new WeakMap();
 
     function addRow(item, downloadable) {
         const row = document.createElement('li');
+        itemRows.set(item, row);
         row.className = 'uih-item';
         const a = row.appendChild(document.createElement('a'));
         a.className = 'uih-link';
@@ -214,7 +216,6 @@
                     'uih-source': courseId,
                     'uih-filter': state.filter,
                     'uih-query': search.value,
-                    'uih-scroll': String(root.querySelector('#uih-body').scrollTop),
                 });
                 window.open(url.href, '_blank', 'noopener');
             });
@@ -222,7 +223,7 @@
         return row;
     }
 
-    function render() {
+    function render(locateTarget = null) {
         const total = state.files.length + state.links.length;
         tab.querySelector('span').textContent = total;
         tab.setAttribute('aria-label', `课程资料，共 ${total} 项`);
@@ -237,7 +238,7 @@
         for (const type of ['files', 'links']) {
             if (state.filter !== 'all' && state.filter !== type) continue;
             for (const item of state[type]) {
-                if (query && !`${item.name} ${item.teacher || '本页点评'} ${item.href || ''}`.toLocaleLowerCase().includes(query)) continue;
+                if (item !== locateTarget && query && !`${item.name} ${item.teacher || '本页点评'} ${item.href || ''}`.toLocaleLowerCase().includes(query)) continue;
                 fragment.appendChild(addRow(item, type === 'files'));
                 count++;
             }
@@ -401,14 +402,17 @@
         const filter = locateParams.get('uih-filter');
         if (['all', 'files', 'links'].includes(filter)) state.filter = filter;
         search.value = locateParams.get('uih-query') || '';
-        render();
-        setOpen(true, false);
-        const savedScroll = Number(locateParams.get('uih-scroll'));
-        root.querySelector('#uih-body').scrollTop = Number.isFinite(savedScroll) ? Math.max(0, savedScroll) : 0;
         const name = locateParams.get('uih-name');
         const href = locateParams.get('uih-href') || '';
         const target = state[locateType].find(item => item.name === name && (item.href || '') === href);
+        render(target);
+        setOpen(true, false);
         if (target?.ele) {
+            const targetRow = itemRows.get(target);
+            if (targetRow?.isConnected) {
+                targetRow.scrollIntoView({ behavior: 'instant', block: 'center' });
+                flash(targetRow);
+            }
             target.ele.scrollIntoView({ block: 'center' });
             setTimeout(() => flash(target.ele), 300);
         } else {
