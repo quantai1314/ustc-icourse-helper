@@ -3,7 +3,7 @@
 // @name:zh-CN   USTC 评课社区助手
 // @license      gpl-3.0
 // @namespace    ustc-icourse-helper
-// @version      1.5.2
+// @version      1.5.3
 // @description  Auto-collect attachments and links from course reviews on icourse.club into a floating panel, with one-click collection from other teachers' pages of the same course. Works for anonymous users too (attachments shown as login-required). Based on PRO's USTC Helper (GPL-3.0) icourse module, no external dependencies.
 // @description:zh-CN  自动收集评课社区课程点评区的附件和链接,在页面右侧生成悬浮汇总面板,支持快速定位到原点评;可一键搜集同课程其他老师页面的资料(当日缓存)。未登录也能用:附件显示名称并提示登录后下载。基于 PRO 的 USTC Helper (GPL-3.0) icourse 模块提取,无任何外部依赖。
 // @match        https://icourse.club/*
@@ -315,15 +315,31 @@
             loadedCache = true;
             merge();
         }
+        function writeCache() {
+            try {
+                // 缓存连本页自身一起存,跨页恢复时来源页老师不会被算作未搜集。
+                const pages = [...collected.values()].filter(p => normHref(p.href) !== `/course/${courseId}`);
+                pages.push({ href: `/course/${courseId}`, files: plain(local.files), links: plain(local.links) });
+                localStorage.setItem(cacheKey, JSON.stringify({ version: 2, date: new Date().toDateString(), pages }));
+            } catch (e) { /* 存储不可用时仍可在当前页面重试 */ }
+        }
         restoreCollected = sourceCourseId => {
             readCache(`ustc-icourse-xc:${sourceCourseId}:${loginState}`);
             merge();
             search.placeholder = '搜索文件名、链接或老师';
             root.querySelector('label[for="uih-search"]').textContent = search.placeholder;
             const remaining = teachers.length - collected.size;
-            moreBtn.textContent = remaining ? `继续搜集其余 ${remaining} 位老师` : '搜集完成';
-            moreBtn.disabled = !remaining;
-            status.textContent = collected.size ? '已恢复来源页的今日缓存，未重新搜集。' : '未找到可恢复的今日缓存，可手动搜集。';
+            if (collected.size) {
+                // 恢复也落盘,链式跳转的下一跳才有缓存可读。
+                writeCache();
+                moreBtn.textContent = remaining ? `继续搜集其余 ${remaining} 位老师` : '搜集完成';
+                moreBtn.disabled = !remaining;
+                status.textContent = '已恢复来源页的今日缓存，未重新搜集。';
+            } else {
+                moreBtn.textContent = '搜集其他老师资料';
+                moreBtn.disabled = false;
+                status.textContent = '来源页暂无可恢复的今日缓存，可点击搜集。';
+            }
         };
 
         moreBtn.addEventListener('click', async () => {
@@ -371,12 +387,7 @@
                     `已检查 ${teachers.length} 位老师，${files + links ? `找到 ${files} 个文件、${links} 个链接。` : '暂未发现其他资料。'}${fromCache ? '（今日缓存）' : ''}`;
                 moreBtn.textContent = failed ? `重试失败的 ${failed} 位老师` : '搜集完成';
                 moreBtn.disabled = !failed;
-                try {
-                    // 缓存连本页自身一起存,跨页恢复时来源页老师不会被算作未搜集。
-                    const pages = [...collected.values()].filter(p => normHref(p.href) !== `/course/${courseId}`);
-                    pages.push({ href: `/course/${courseId}`, files: plain(local.files), links: plain(local.links) });
-                    localStorage.setItem(cacheKey, JSON.stringify({ version: 2, date: new Date().toDateString(), pages }));
-                } catch (e) { /* 存储不可用时仍可在当前页面重试 */ }
+                writeCache();
             }
         });
     }
