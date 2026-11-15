@@ -3,7 +3,7 @@
 // @name:zh-CN   USTC 评课社区助手
 // @license      gpl-3.0
 // @namespace    ustc-icourse-helper
-// @version      1.3.0
+// @version      1.4.0
 // @description  Auto-collect attachments and links from course reviews on icourse.club into a floating panel, with one-click collection from other teachers' pages of the same course. Works for anonymous users too (attachments shown as login-required). Based on PRO's USTC Helper (GPL-3.0) icourse module, no external dependencies.
 // @description:zh-CN  自动收集评课社区课程点评区的附件和链接,在页面右侧生成悬浮汇总面板,支持快速定位到原点评;可一键搜集同课程其他老师页面的资料(当日缓存)。未登录也能用:附件显示名称并提示登录后下载。基于 PRO 的 USTC Helper (GPL-3.0) icourse 模块提取,无任何外部依赖。
 // @match        https://icourse.club/*
@@ -131,8 +131,8 @@
         `<button type="button" data-filter="all" aria-pressed="true">全部 0</button>` +
         `<button type="button" data-filter="files" aria-pressed="false">文件 0</button>` +
         `<button type="button" data-filter="links" aria-pressed="false">链接 0</button></div>` +
-        `<div id="uih-search-row"><label class="uih-sr-only" for="uih-search">搜索文件名、链接或老师</label>` +
-        `<input id="uih-search" type="search" placeholder="搜索文件名、链接或老师" autocomplete="off">` +
+        `<div id="uih-search-row"><label class="uih-sr-only" for="uih-search">搜索文件名或链接</label>` +
+        `<input id="uih-search" type="search" placeholder="搜索文件名或链接" autocomplete="off">` +
         `<button id="uih-clear" type="button" hidden>清空</button></div><p id="uih-summary"></p></div>` +
         `<div id="uih-body"><ul id="uih-list" role="list"></ul><p id="uih-empty" hidden></p></div>` +
         `<footer id="uih-foot"><p id="uih-status" role="status" aria-live="polite" aria-atomic="true"></p>` +
@@ -191,18 +191,28 @@
         } else {
             meta.appendChild(document.createElement('span')).textContent = '本页点评';
         }
-        if (item.ele) {
+        if (item.ele || item.teacherHref) {
             const loc = meta.appendChild(document.createElement('button'));
             loc.type = 'button';
             loc.className = 'uih-loc';
             loc.textContent = '定位';
-            loc.title = '定位到原点评';
+            loc.title = item.ele ? '定位到原点评' : `前往 ${item.teacher} 老师的课程页定位原点评`;
             loc.setAttribute('aria-label', `定位：${item.name}`);
             loc.addEventListener('click', () => {
-                // 窄屏上先收起遮挡正文的面板,桌面上保留连续浏览。
-                if (window.matchMedia('(max-width: 480px)').matches) setOpen(false);
-                item.ele.scrollIntoView({ block: 'center' });
-                setTimeout(() => flash(item.ele), 300);
+                if (item.ele) {
+                    // 窄屏上先收起遮挡正文的面板,桌面上保留连续浏览。
+                    if (window.matchMedia('(max-width: 480px)').matches) setOpen(false);
+                    item.ele.scrollIntoView({ block: 'center' });
+                    setTimeout(() => flash(item.ele), 300);
+                    return;
+                }
+                const url = new URL(item.teacherHref, location.href);
+                url.hash = new URLSearchParams({
+                    'uih-locate': downloadable ? 'files' : 'links',
+                    'uih-name': item.name,
+                    'uih-href': item.href || '',
+                });
+                window.open(url.href, '_blank', 'noopener');
             });
         }
         return row;
@@ -257,7 +267,7 @@
         status.textContent = '本页未列出其他老师的同课程页面。';
     } else {
         status.textContent = `还可搜集 ${teachers.length} 位老师的同课程资料。`;
-        const cacheKey = `ustc-icourse-xc:${courseId}`;
+        const cacheKey = `ustc-icourse-xc:${courseId}:${document.querySelector('#signin') ? 'anonymous' : 'authenticated'}`;
         const collected = new Map();
         let loadedCache = false;
         let busy = false;
@@ -294,6 +304,8 @@
         moreBtn.addEventListener('click', async () => {
             if (busy) return;
             busy = true;
+            search.placeholder = '搜索文件名、链接或老师';
+            root.querySelector('label[for="uih-search"]').textContent = search.placeholder;
             moreBtn.disabled = true;
             moreBtn.textContent = '正在搜集…';
             status.classList.remove('uih-warning');
@@ -361,6 +373,23 @@
             setOpen(false);
         }
     });
+
+    const locateParams = new URLSearchParams(location.hash.slice(1));
+    const locateType = locateParams.get('uih-locate');
+    if (locateType === 'files' || locateType === 'links') {
+        history.replaceState(null, '', location.pathname + location.search);
+        const name = locateParams.get('uih-name');
+        const href = locateParams.get('uih-href') || '';
+        const target = state[locateType].find(item => item.name === name && (item.href || '') === href);
+        if (target?.ele) {
+            target.ele.scrollIntoView({ block: 'center' });
+            setTimeout(() => flash(target.ele), 300);
+        } else {
+            status.classList.add('uih-warning');
+            status.textContent = '未找到要定位的原点评，页面内容可能已更新。';
+            setOpen(true);
+        }
+    }
 
     // 只提示入口位置,不自动展开或定时收起用户正在阅读的面板。
     try {
