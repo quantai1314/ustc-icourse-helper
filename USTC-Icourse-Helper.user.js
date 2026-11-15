@@ -3,7 +3,7 @@
 // @name:zh-CN   USTC 评课社区助手
 // @license      gpl-3.0
 // @namespace    ustc-icourse-helper
-// @version      1.4.0
+// @version      1.5.0
 // @description  Auto-collect attachments and links from course reviews on icourse.club into a floating panel, with one-click collection from other teachers' pages of the same course. Works for anonymous users too (attachments shown as login-required). Based on PRO's USTC Helper (GPL-3.0) icourse module, no external dependencies.
 // @description:zh-CN  自动收集评课社区课程点评区的附件和链接,在页面右侧生成悬浮汇总面板,支持快速定位到原点评;可一键搜集同课程其他老师页面的资料(当日缓存)。未登录也能用:附件显示名称并提示登录后下载。基于 PRO 的 USTC Helper (GPL-3.0) icourse 模块提取,无任何外部依赖。
 // @match        https://icourse.club/*
@@ -211,6 +211,10 @@
                     'uih-locate': downloadable ? 'files' : 'links',
                     'uih-name': item.name,
                     'uih-href': item.href || '',
+                    'uih-source': courseId,
+                    'uih-filter': state.filter,
+                    'uih-query': search.value,
+                    'uih-scroll': String(root.querySelector('#uih-body').scrollTop),
                 });
                 window.open(url.href, '_blank', 'noopener');
             });
@@ -262,18 +266,20 @@
     log(`本页: 文件 ${local.files.length}, 链接 ${local.links.length}.`);
 
     // ---- 搜集其他老师的同课程资料 ----
+    let restoreCollected = () => {};
     if (!teachers.length) {
         moreBtn.hidden = true;
         status.textContent = '本页未列出其他老师的同课程页面。';
     } else {
         status.textContent = `还可搜集 ${teachers.length} 位老师的同课程资料。`;
-        const cacheKey = `ustc-icourse-xc:${courseId}:${document.querySelector('#signin') ? 'anonymous' : 'authenticated'}`;
+        const loginState = document.querySelector('#signin') ? 'anonymous' : 'authenticated';
+        const cacheKey = `ustc-icourse-xc:${courseId}:${loginState}`;
         const collected = new Map();
         let loadedCache = false;
         let busy = false;
-        function readCache() {
+        function readCache(key = cacheKey) {
             try {
-                const c = JSON.parse(localStorage.getItem(cacheKey));
+                const c = JSON.parse(localStorage.getItem(key));
                 if (c?.version !== 2 || c.date !== new Date().toDateString() || !Array.isArray(c.pages)) return;
                 for (const page of c.pages) {
                     if (!teachers.some(t => t.href === page.href) || !Array.isArray(page.files) || !Array.isArray(page.links)) continue;
@@ -301,6 +307,22 @@
             render();
         }
 
+        function loadCache(key = cacheKey) {
+            readCache(key);
+            loadedCache = true;
+            merge();
+        }
+        restoreCollected = sourceCourseId => {
+            readCache(`ustc-icourse-xc:${sourceCourseId}:${loginState}`);
+            merge();
+            search.placeholder = '搜索文件名、链接或老师';
+            root.querySelector('label[for="uih-search"]').textContent = search.placeholder;
+            const remaining = teachers.length - collected.size;
+            moreBtn.textContent = remaining ? `继续搜集其余 ${remaining} 位老师` : '搜集完成';
+            moreBtn.disabled = !remaining;
+            status.textContent = collected.size ? '已恢复来源页的今日缓存，未重新搜集。' : '未找到可恢复的今日缓存，可手动搜集。';
+        };
+
         moreBtn.addEventListener('click', async () => {
             if (busy) return;
             busy = true;
@@ -309,11 +331,7 @@
             moreBtn.disabled = true;
             moreBtn.textContent = '正在搜集…';
             status.classList.remove('uih-warning');
-            if (!loadedCache) {
-                readCache();
-                loadedCache = true;
-                merge();
-            }
+            if (!loadedCache) loadCache();
             const queue = teachers.filter(t => !collected.has(t.href));
             const fromCache = !queue.length;
             let done = collected.size;
@@ -378,6 +396,15 @@
     const locateType = locateParams.get('uih-locate');
     if (locateType === 'files' || locateType === 'links') {
         history.replaceState(null, '', location.pathname + location.search);
+        const sourceCourseId = locateParams.get('uih-source');
+        if (/^\d+$/.test(sourceCourseId || '')) restoreCollected(sourceCourseId);
+        const filter = locateParams.get('uih-filter');
+        if (['all', 'files', 'links'].includes(filter)) state.filter = filter;
+        search.value = locateParams.get('uih-query') || '';
+        render();
+        setOpen(true, false);
+        const savedScroll = Number(locateParams.get('uih-scroll'));
+        root.querySelector('#uih-body').scrollTop = Number.isFinite(savedScroll) ? Math.max(0, savedScroll) : 0;
         const name = locateParams.get('uih-name');
         const href = locateParams.get('uih-href') || '';
         const target = state[locateType].find(item => item.name === name && (item.href || '') === href);
@@ -387,7 +414,6 @@
         } else {
             status.classList.add('uih-warning');
             status.textContent = '未找到要定位的原点评，页面内容可能已更新。';
-            setOpen(true);
         }
     }
 
