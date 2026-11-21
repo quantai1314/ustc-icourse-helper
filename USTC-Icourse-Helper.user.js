@@ -3,7 +3,7 @@
 // @name:zh-CN   USTC 评课社区助手
 // @license      gpl-3.0
 // @namespace    ustc-icourse-helper
-// @version      1.5.3
+// @version      1.5.4
 // @description  Auto-collect attachments and links from course reviews on icourse.club into a floating panel, with one-click collection from other teachers' pages of the same course. Works for anonymous users too (attachments shown as login-required). Based on PRO's USTC Helper (GPL-3.0) icourse module, no external dependencies.
 // @description:zh-CN  自动收集评课社区课程点评区的附件和链接,在页面右侧生成悬浮汇总面板,支持快速定位到原点评;可一键搜集同课程其他老师页面的资料(当日缓存)。未登录也能用:附件显示名称并提示登录后下载。基于 PRO 的 USTC Helper (GPL-3.0) icourse 模块提取,无任何外部依赖。
 // @match        https://icourse.club/*
@@ -66,6 +66,24 @@
         ele.animate([
             { backgroundColor: '#fff0ad' }, { backgroundColor: 'transparent' }
         ], { duration: 1600 });
+    }
+
+    function locateInPage(ele) {
+        // 评课社区对超过 100vh 的长点评折叠为 .review > .review-wrapper > .review-content.folded + button.read-more，
+        // 定位前先点击展开，避免 scrollIntoView 在 overflow: hidden 容器内滚偏。
+        const review = ele.closest('.review');
+        const content = ele.closest('.review-content');
+        const wrapper = ele.closest('.review-wrapper');
+        if (!review?.classList.contains('display-folded')) {
+            const readMore = (wrapper || review)?.querySelector('button.read-more');
+            if (readMore && getComputedStyle(readMore).display !== 'none') readMore.click();
+            if (content?.classList.contains('folded') && review && !review.classList.contains('display-folded')) {
+                review.classList.add('display-folded');
+            }
+        }
+        if (content) content.scrollTop = 0;
+        ele.scrollIntoView({ block: 'center' });
+        setTimeout(() => flash(ele), 300);
     }
 
     const style = document.head.appendChild(document.createElement('style'));
@@ -204,8 +222,7 @@
                 if (item.ele) {
                     // 窄屏上先收起遮挡正文的面板,桌面上保留连续浏览。
                     if (window.matchMedia('(max-width: 480px)').matches) setOpen(false);
-                    item.ele.scrollIntoView({ block: 'center' });
-                    setTimeout(() => flash(item.ele), 300);
+                    locateInPage(item.ele);
                     return;
                 }
                 const url = new URL(item.teacherHref, location.href);
@@ -429,8 +446,7 @@
                 targetRow.scrollIntoView({ behavior: 'instant', block: 'center' });
                 flash(targetRow);
             }
-            target.ele.scrollIntoView({ block: 'center' });
-            setTimeout(() => flash(target.ele), 300);
+            locateInPage(target.ele);
         } else {
             status.classList.add('uih-warning');
             status.textContent = '未找到要定位的原点评，页面内容可能已更新。';

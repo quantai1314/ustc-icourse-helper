@@ -35,13 +35,20 @@ async (page) => {
             return;
         }
         const teacherLinks = teachers[id].map(t => `<a href="${t.href}">${t.name}</a>`).join('');
-        const reviews = localFiles[id].map(item =>
-            `<div class="review-content"><a href="${item.href}">${item.name}</a></div>`
-        ).join('');
+        const reviews = localFiles[id].map((item, index) => index === 19 ? (
+            `<div class="ud-pd-md dashed review" id="review-${id}-${index + 1}">` +
+            `<div class="review-wrapper"><div class="review-content ck-content folded">` +
+            `<div style="height:150vh"></div><a href="${item.href}">${item.name}</a>` +
+            `</div><button class="read-more" type="button">查看更多</button></div></div>`
+        ) : (
+            `<div class="ud-pd-md dashed review" id="review-${id}-${index + 1}"><div class="review-content"><a href="${item.href}">${item.name}</a></div></div>`
+        )).join('');
         await route.fulfill({
             contentType: 'text/html; charset=utf-8',
-            body: `<!doctype html><html><head><meta charset="utf-8"><title>课程 ${id}</title><style>.review-content{min-height:80px}</style></head><body>` +
+            body: `<!doctype html><html><head><meta charset="utf-8"><title>课程 ${id}</title>` +
+                `<style>.review-content{min-height:80px}.folded{max-height:100vh;overflow:hidden}.display-folded .review-content{max-height:unset}.display-folded .read-more{display:none!important}</style></head><body>` +
                 `<main>${reviews}</main><div class="col-md-4 rl-pd-lg"><div><h4>其他老师的课</h4>${teacherLinks}</div></div>` +
+                `<script>document.addEventListener('click',e=>{const btn=e.target.closest('button.read-more');if(btn)btn.closest('.review')?.classList.add('display-folded');});</script>` +
                 `<script src="https://icourse.club/__uih.user.js"></script></body></html>`,
         });
     });
@@ -67,6 +74,25 @@ async (page) => {
     await page.locator('#uih-body').evaluate(element => { element.scrollTop = 120; });
     served.length = 0;
 
+    await page.locator('.uih-item', { hasText: 'A 资料 20' }).locator('.uih-loc').evaluate(button => button.click());
+    const localLocated = await page.evaluate(() => {
+        const link = Array.from(document.querySelectorAll('.review-content a')).find(a => a.textContent === 'A 资料 20');
+        const review = link.closest('.review');
+        const content = link.closest('.review-content');
+        const btn = review.querySelector('button.read-more');
+        const box = link.getBoundingClientRect();
+        return {
+            expanded: review.classList.contains('display-folded'),
+            contentScrollTop: content.scrollTop,
+            readMoreDisplay: getComputedStyle(btn).display,
+            offset: Math.abs(box.top + box.height / 2 - innerHeight / 2),
+        };
+    });
+    if (!localLocated.expanded) throw new Error('本页折叠长点评未自动展开');
+    if (localLocated.contentScrollTop !== 0) throw new Error(`折叠容器内部残留滚动偏移: ${localLocated.contentScrollTop}`);
+    if (localLocated.readMoreDisplay !== 'none') throw new Error('展开后查看更多按钮未隐藏');
+    if (localLocated.offset > 1) throw new Error(`本页折叠长点评定位偏离视口中心: 偏差 ${localLocated.offset}`);
+
     const opened = page.context().waitForEvent('page');
     await page.locator('.uih-item', { hasText: 'B 资料 20' }).locator('.uih-loc').evaluate(button => button.click());
     const target = await opened;
@@ -88,6 +114,8 @@ async (page) => {
             rowOffset: Math.abs(rowBox.top + rowBox.height / 2 - bodyBox.top - bodyBox.height / 2),
             rowAnimations: row.getAnimations().length,
             reviewOffset: Math.abs(reviewBox.top + reviewBox.height / 2 - innerHeight / 2),
+            reviewExpanded: review.closest('.review').classList.contains('display-folded'),
+            reviewContentScrollTop: review.closest('.review-content').scrollTop,
             cachedRows: Array.from(document.querySelectorAll('.uih-item')).filter(row => row.textContent.includes('C 资料 01')).length,
         };
     });
@@ -97,6 +125,8 @@ async (page) => {
     if (restored.rowOffset > 1) throw new Error(`浮窗未定位到本页对应文件: 偏差 ${restored.rowOffset}, scrollTop ${restored.scrollTop}`);
     if (!restored.rowAnimations) throw new Error('本页对应文件未高亮');
     if (restored.reviewOffset > 1) throw new Error(`正文未定位到原点评: 偏差 ${restored.reviewOffset}`);
+    if (!restored.reviewExpanded) throw new Error('跨页定位后折叠长点评未自动展开');
+    if (restored.reviewContentScrollTop !== 0) throw new Error(`跨页定位后折叠容器内部残留滚动偏移: ${restored.reviewContentScrollTop}`);
     if (restored.cachedRows !== 1) throw new Error('来源页的当日搜集缓存未恢复');
     if (served.join(',') !== '102') throw new Error(`恢复过程意外重新抓取了课程页: ${served.join(',')}`);
 
@@ -117,12 +147,16 @@ async (page) => {
             rowVisible: Boolean(row),
             rowAnimations: row ? row.getAnimations().length : 0,
             reviewOffset: Math.abs(reviewBox.top + reviewBox.height / 2 - innerHeight / 2),
+            reviewExpanded: review.closest('.review').classList.contains('display-folded'),
+            reviewContentScrollTop: review.closest('.review-content').scrollTop,
         };
     });
     if (teacherResult.query !== '乙老师') throw new Error('老师名搜索词未恢复');
     if (!teacherResult.rowVisible) throw new Error('按老师名搜索时，本页目标文件被过滤');
     if (!teacherResult.rowAnimations) throw new Error('按老师名搜索时，本页目标文件未高亮');
     if (teacherResult.reviewOffset > 1) throw new Error('按老师名搜索时，正文未定位到原点评');
+    if (!teacherResult.reviewExpanded) throw new Error('按老师名搜索定位后折叠长点评未自动展开');
+    if (teacherResult.reviewContentScrollTop !== 0) throw new Error(`按老师名搜索定位后折叠容器内部残留滚动偏移: ${teacherResult.reviewContentScrollTop}`);
     if (served.join(',') !== '102') throw new Error(`老师名搜索恢复时意外抓取了课程页: ${served.join(',')}`);
 
     await page.goto('https://icourse.club/course/102/');
